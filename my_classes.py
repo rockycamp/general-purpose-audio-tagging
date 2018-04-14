@@ -1,28 +1,47 @@
 import numpy as np
-import keras
+import librosa
 import audio_processor as ap
 
-class DataGenerator(keras.utils.Sequence):
-    'Generates data for Keras'
-    def __init__(self, list_IDs, labels, location, batch_size=4, dim=(48, 126), n_channels=1,
-                 n_classes=2, shuffle=True, NFFT=64, Fs=2000, noverlap=32):
-        'Initialization'
-        self.location = location
-        self.dim = dim
-        self.batch_size = batch_size
-        self.labels = labels
-        self.list_IDs = list_IDs
-        self.n_channels = n_channels
+from keras.utils import Sequence, to_categorical
+
+class Config(object):
+    def __init__(self,
+                 sampling_rate=16000, audio_duration=2, n_classes=41,
+                 use_mfcc=False, n_folds=10, learning_rate=0.0001,
+                 max_epochs=50, n_mfcc=20):
+        self.sampling_rate = sampling_rate
+        self.audio_duration = audio_duration
         self.n_classes = n_classes
-        self.shuffle = shuffle
-        self.NFFT = NFFT
-        self.Fs = Fs
-        self.noverlap = noverlap
+        self.use_mfcc = use_mfcc
+        self.n_mfcc = n_mfcc
+        self.n_folds = n_folds
+        self.learning_rate = learning_rate
+        self.max_epochs = max_epochs
+
+        self.audio_length = self.sampling_rate * self.audio_duration
+        if self.use_mfcc:
+            self.dim = (self.n_mfcc, 1 + int(np.floor(self.audio_length/512)), 1)
+        else:
+            self.dim = (self.audio_length, 1)
+
+
+class DataGenerator(Sequence):
+    'Generates data for Keras'
+    def __init__(self, config, data_dir, list_IDs, labels=None,
+                 batch_size=64, preprocessing_fn=lambda x: x):
+        self.config = config
+        self.data_dir = data_dir
+        self.list_IDs = list_IDs
+        self.labels = labels
+        self.batch_size = batch_size
+        self.preprocessing_fn = preprocessing_fn
         self.on_epoch_end()
+        self.dim = self.config.dim
+        self.shuffle = True
 
     def __len__(self):
         'Denotes the number of batches per epoch'
-        return int(np.floor(len(self.list_IDs) / self.batch_size))
+        return int(np.ceil(len(self.list_IDs) / self.batch_size))
 
     def __getitem__(self, index):
         'Generate one batch of data'
@@ -43,42 +62,49 @@ class DataGenerator(keras.utils.Sequence):
         if self.shuffle == True:
             np.random.shuffle(self.indexes)
 
-    def __data_generation_mel(self, list_IDs_temp):
-        'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
-        # Initialization
-        X = np.empty((self.batch_size, self.n_channels, *self.dim, ))
-        y = np.empty((self.batch_size), dtype=int)
-
-        # Generate data
-        for i, ID in enumerate(list_IDs_temp):
-
-            # Store sample
-            if self.labels[ID] == 1:
-                X[i,] = ap.compute_melgram(self.location +'/right/'+ ID)
-            else:
-                X[i,] = ap.compute_melgram(self.location + '/nonright/'+ ID)
-            #X[i,] = np.load('data/' + ID + '.npy')
-
-            # Store class
-            y[i] = self.labels[ID]
-
-        X = X.reshape((self.batch_size, self.dim[0], self.dim[1], 1))
-
-        return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
-
     def __data_generation(self, list_IDs_temp):
         'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
         # Initialization
-        X = np.empty((self.batch_size, *self.dim, self.n_channels))
-        y = np.empty((self.batch_size), dtype=int)
+        cur_batch_size = len(list_IDs_temp)
+        X = np.empty((cur_batch_size, *self.dim))
+
 
         # Generate data
+        input_length = self.config.audio_length
         for i, ID in enumerate(list_IDs_temp):
-            # Store sample
-            X[i,] = np.load('data/' + ID + '.npy')
 
-            # Store class
-            y[i] = self.labels[ID]
+            file_path = self.data_dir + ID
 
-        return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
+            # Read/resample audio data
+            data, _ = librosa.core.load(file_path, sr=self.config.sampling_rate, res_type='kaiser_fast')
 
+            # Random offset and padding
+            if len(data) > input_length:
+                max_offset = len(data) - input_length
+                offset = np.random.randint(max_offset)
+                data = data[offset:(input_length+offset)]
+            else:
+                if input_length > len(data):
+                    max_offset = input_length - len(data)
+                    offset = np.random.randint(max_offset)
+                else:
+                    offset = 0
+                data = np.pad(data, (offset, input_length - len(data) - offset), "constant")
+
+            # Normalisation and preprocessing
+            if self.config.use_mfcc:
+                data = librosa.feature.mfcc(data, sr=self.config.sampling_rate, n_mfcc=self.config.n_mfcc)
+                data = np.expand_dims(data, axis=-1)
+            else:
+                data = np.self.preprocessing_fn(data)[:, np.newaxis]
+
+            X[i,] = data
+
+        # store class
+        if self.labels is not None:
+            y = np.empty((self.batch_size), dtype=int)
+            for i, ID in enumerate(list_IDs_temp):
+                y[i] = self.labels[ID]
+            return X, to_categorical(y, num_classes=self.config.n_classes)
+        else:
+            return X
