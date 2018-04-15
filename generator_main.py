@@ -360,7 +360,7 @@ def conv2d_main():
         test = test[:1000]
 
     config = Config(sampling_rate=44100, audio_duration=3, n_folds=10,
-                    learning_rate=0.001, use_mfcc=True, n_mfcc=96)
+                    learning_rate=0.0005, use_mfcc=True, n_mfcc=96)
     if DEBUG_MODEL:
         config = Config(sampling_rate=44100, audio_duration=2, n_folds=3,
                         max_epochs=1, use_mfcc=True, n_mfcc=40)
