@@ -359,7 +359,7 @@ def conv2d_main():
         train = train[:1000]
         test = test[:1000]
 
-    config = Config(sampling_rate=44100, audio_duration=5, n_folds=10,
+    config = Config(sampling_rate=44100, audio_duration=3, n_folds=10,
                     learning_rate=0.001, use_mfcc=True, n_mfcc=96)
     if DEBUG_MODEL:
         config = Config(sampling_rate=44100, audio_duration=2, n_folds=3,
